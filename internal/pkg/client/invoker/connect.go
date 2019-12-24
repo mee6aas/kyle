@@ -1,4 +1,4 @@
-package invokee
+package invoker
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 
-	v1 "github.com/mee6aas/zeep/pkg/api/invokee/v1"
+	v1 "github.com/mee6aas/zeep/pkg/api/invoker/v1"
 )
 
 // Connect connects to the agent with the specified address.
@@ -16,12 +16,7 @@ func Connect(ctx context.Context, addr string) (e error) {
 		return
 	}
 
-	client = v1.NewInvokeeClient(conn)
-
-	if e = listen(ctx); e != nil {
-		e = errors.Wrap(e, "Failed to listen")
-		return
-	}
+	client = v1.NewInvokerClient(conn)
 
 	return
 }

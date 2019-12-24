@@ -12,14 +12,14 @@ type TaskAssigner interface {
 	Close()
 }
 
-// Allocate sets the specified task assigner to this runtime.
-func (r *Runtime) Allocate(ta TaskAssigner) (e error) {
-	if r.isAllocated {
+// Connect sets the specified task assigner to this runtime.
+func (r *Runtime) Connect(ta TaskAssigner) (e error) {
+	if r.isConnected {
 		e = errors.New("Already allocated worker")
 		return
 	}
 
-	r.isAllocated = true
+	r.isConnected = true
 	r.taskAssigner = ta
 
 	return

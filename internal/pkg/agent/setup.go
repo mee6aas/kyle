@@ -18,10 +18,12 @@ func Setup(conf Config) (e error) {
 	servePort = strconv.Itoa(int(conf.Port))
 	serveAddr = serveHost + ":" + servePort
 
-	pool.Setup(pool.Config{
+	if e = pool.Setup(pool.Config{
 		AgentHost: conf.Host,
 		AgentPort: conf.Port,
-	})
+	}); e != nil {
+		return
+	}
 
 	return
 }

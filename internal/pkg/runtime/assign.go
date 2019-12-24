@@ -8,7 +8,7 @@ import (
 
 // Assign passes task to operator
 func (r *Runtime) Assign(ctx context.Context, task interface{}) (e error) {
-	if !r.IsAllocated() {
+	if !r.isConnected {
 		e = errors.New("Task operator not allocated")
 		return
 	}

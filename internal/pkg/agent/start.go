@@ -3,34 +3,39 @@ package agent
 import (
 	"context"
 	"path/filepath"
-	"sync"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/mee6aas/zeep/api"
-	"github.com/mee6aas/zeep/pkg/activity"
 	invokeeV1API "github.com/mee6aas/zeep/pkg/api/invokee/v1"
 
+	"github.com/mee6aas/kyle/internal/pkg/cact"
 	"github.com/mee6aas/kyle/internal/pkg/client/invokee"
+	"github.com/mee6aas/kyle/internal/pkg/client/invoker"
 	"github.com/mee6aas/kyle/internal/pkg/pool"
 	assigns "github.com/mee6aas/kyle/internal/pkg/var/assignments"
 )
 
 // Start starts the agent
 func Start(ctx context.Context) (e error) {
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
+	var (
+		actMain string // name of the activity allocated to this container
+	)
 
-	startCtx, startCancel := context.WithCancel(ctx)
-	defer startCancel()
+	// wg := sync.WaitGroup{}
+	// defer wg.Wait()
+
+	startCtx, _ := context.WithCancel(ctx)
+	// startCtx, startCancel := context.WithCancel(ctx)
+	// defer startCancel()
 
 	defer func() {
 		if e == nil {
 			return
 		}
 
-		log.WithError(e).Error("agent.start failed")
+		log.WithError(e).Error("Agent failed")
 	}()
 
 	e = invokee.Connect(startCtx, localAgntAddr)
@@ -39,7 +44,13 @@ func Start(ctx context.Context) (e error) {
 		return
 	}
 
-	wg.Add(1)
+	e = invoker.Connect(startCtx, localAgntAddr)
+	if e != nil {
+		e = errors.Wrapf(e, "Failed to connect to local agent invoker service at %s", localAgntAddr)
+		return
+	}
+
+	// wg.Add(1)
 	go func() {
 		// defer wg.Done()
 		// defer startCancel()
@@ -54,7 +65,7 @@ func Start(ctx context.Context) (e error) {
 		}
 	}()
 
-	wg.Add(1)
+	// wg.Add(1)
 	go func() {
 		// defer wg.Done()
 		// defer startCancel()
@@ -69,7 +80,7 @@ func Start(ctx context.Context) (e error) {
 		}
 	}()
 
-	log.Debug("Waiting the task LOAD")
+	log.Debug("Waiting the task::LOAD")
 	t, e := invokee.FetchTask(startCtx)
 	if e != nil {
 		e = errors.Wrap(e, "Failed to fetch a task from the invokee service")
@@ -81,9 +92,10 @@ func Start(ctx context.Context) (e error) {
 		return
 	}
 
-	ap := filepath.Join(api.ActivityResource, t.GetArg(), api.ActivityManifestName)
+	actMain = t.GetArg()
+	ap := filepath.Join(api.ActivityResource, actMain, api.ActivityManifestName)
 	log.WithField("path", ap).Debug("Unmarshalling the activity manifest")
-	a, e := activity.UnmarshalFromFile(ap)
+	e = cact.UnmarshalFromFile(ap)
 	if e != nil {
 		e = errors.Wrapf(e, "Failed to unmarshal the activity manifest at %s", ap)
 		return
@@ -92,46 +104,47 @@ func Start(ctx context.Context) (e error) {
 	log.Debug("Fetch the runtime")
 	r, e := pool.Fetch(startCtx)
 	if e != nil {
-		e = errors.Wrap(e, "Failed to fetch runtime")
+		e = errors.Wrap(e, "Failed to fetch the runtime")
 		return
 	}
 	pid, ok := r.PID()
 	if !ok {
-		panic("Failed to get ip form the runtime")
+		e = errors.New("Failed to get PID from the runtime")
+		return
 	}
 
 	id, onResolved := assigns.Add()
 
 	log.WithFields(log.Fields{
-		"arg": t.GetArg(),
+		"arg": actMain,
 		"pid": pid,
-	}).Debug("Give task LOAD to the runtime")
+	}).Debug("Assign the task LOAD to the runtime")
 	e = r.Assign(startCtx, invokeeV1API.Task{
 		Id:   id,
 		Type: invokeeV1API.TaskType_LOAD,
-		Arg:  t.GetArg(),
+		Arg:  actMain,
 	})
 	if e != nil {
 		e = errors.Wrap(e, "Failed to assign a task to the runtime")
 		return
 	}
 
-	isWorkflow := len(a.Dependencies) > 0
+	isWorkflow := cact.HasDep()
 
 	log.WithField("workflow", isWorkflow).Debug("Is the task a workflow?")
 
 	if !isWorkflow {
 		log.Debug("Starting handover procedure")
 
-		// notify to local agent
+		// notify to the local agent
 		e = invokee.Handover(startCtx)
 		if e != nil {
-			e = errors.Wrap(e, "Failed request to handover")
+			e = errors.Wrap(e, "Failed to request handover")
 			return
 		}
 
 		// handover
-		log.WithField("arg", localAgntAddr).Debug("Give task HANDOVER to the runtime")
+		log.WithField("arg", localAgntAddr).Debug("Assign task::HANDOVER to the runtime")
 		r.Assign(startCtx, invokeeV1API.Task{
 			Type: invokeeV1API.TaskType_HANDOVER,
 			Arg:  localAgntAddr,
@@ -146,29 +159,68 @@ func Start(ctx context.Context) (e error) {
 			return
 		}
 
-		// handovered
+		log.Info("The control is handovered to the local agent")
 	}
 
 	// forward report for LOAD task
 	{
 		resolved := <-onResolved
-		log.Debug("resolved?")
+		log.Debug("task::Load resolved")
 		rst := resolved.(*invokeeV1API.ReportRequest)
 
 		e = invokee.Report(startCtx, t.GetId(), rst.GetResult())
 		if e != nil {
-			e = errors.Wrap(e, "Failed to report a LOAD task to invokee service")
+			e = errors.Wrap(e, "Failed to report a task::LOAD to invokee service")
 			return
 		}
 	}
 
 	if !isWorkflow {
+		log.Debug("Stopping gRPC server")
 		gRPCServer.GracefulStop()
 
 		return
 	}
 
-	wg.Wait()
+	log.Info("Listen tasks")
+	for {
+		log.Info("Wait for the task")
+		t, e := invokee.FetchTask(startCtx)
+		if e != nil {
+			e = errors.Wrap(e, "Failed to fetch a task from the invokee service")
+			return e
+		}
+		if ttype := t.GetType(); ttype != invokeeV1API.TaskType_INVOKE {
+			e = errors.Wrapf(e, "Expected that the type of the task is INVOKE but %s", ttype.String())
+			return e
+		}
 
-	return
+		id, onInvoked := assigns.Add()
+		e = r.Assign(startCtx, invokeeV1API.Task{
+			Id:   id,
+			Type: invokeeV1API.TaskType_INVOKE,
+			Arg:  t.GetArg(),
+		})
+
+		// res, e := ivkerV1Hndl.InvokeRequested(startCtx, nil, "", actMain, t.GetArg())
+		if e != nil {
+			e = errors.Wrap(e, "Failed to invoke")
+			return e
+		}
+
+		res, ok := <-onInvoked
+		if !ok {
+			panic("Runtime disconnected while invoke an activity")
+		}
+
+		// FIXME
+		// resolve task version
+		rst := res.(*invokeeV1API.ReportRequest).GetResult()
+
+		e = invokee.Report(startCtx, t.GetId(), rst)
+		if e != nil {
+			e = errors.Wrap(e, "Failed to report")
+			return e
+		}
+	}
 }

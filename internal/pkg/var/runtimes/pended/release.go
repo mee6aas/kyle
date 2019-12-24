@@ -12,7 +12,7 @@ func Release(pid int, ta runtime.TaskAssigner) bool {
 	}
 	delete(runtimes, pid)
 
-	if e := r.runtime.Allocate(ta); e != nil {
+	if e := r.runtime.Connect(ta); e != nil {
 		// already allocated
 		return false
 	}

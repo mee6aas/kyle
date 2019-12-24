@@ -20,7 +20,7 @@ type Runtime struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	isAllocated  bool
+	isConnected  bool
 	taskAssigner TaskAssigner
 	isAssigned   bool
 }
@@ -60,8 +60,8 @@ func (r *Runtime) PID() (int, bool) {
 	return r.cmd.Process.Pid, true
 }
 
-// IsAllocated checks if the task is allocated to this runtime.
-func (r *Runtime) IsAllocated() bool { return r.isAllocated }
+// IsConnected checks if the runtime is connected.
+func (r *Runtime) IsConnected() bool { return r.isConnected }
 
 // IsAssigned checks if the task is assigned to this runtime.
 func (r *Runtime) IsAssigned() bool { return r.isAssigned }

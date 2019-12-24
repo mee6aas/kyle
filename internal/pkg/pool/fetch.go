@@ -15,9 +15,6 @@ func Fetch(ctx context.Context) (r *runtime.Runtime, e error) {
 		if e == nil {
 			return
 		}
-		// go func() {
-		// 	onFetched <- struct{}{}
-		// }()
 	}()
 
 	r, ok := runtimes.Take()
@@ -28,6 +25,11 @@ func Fetch(ctx context.Context) (r *runtime.Runtime, e error) {
 	if e = spawn(ctx, rConf); e != nil {
 		e = errors.Wrap(e, "Failed to spawn a runtime")
 		return
+	}
+
+	r, ok = runtimes.Take()
+	if !ok {
+		panic("Spawned but failed to take it")
 	}
 
 	return
